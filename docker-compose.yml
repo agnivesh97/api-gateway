@@ -1,0 +1,23 @@
+services:
+  # --- API Gateway ---
+  gateway:
+    build: ./gateway
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./gateway/config:/app/config
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - service-a
+      - service-b
+    restart: unless-stopped
+
+  # --- Demo Backend Services ---
+  service-a:
+    build: ./service-a
+    restart: unless-stopped
+
+  service-b:
+    build: ./service-b
+    restart: unless-stopped

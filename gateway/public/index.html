@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TiwariJi API Gateway</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <nav>
+    <div class="nav-brand">🙏 TiwariJi Gateway</div>
+    <div class="nav-status">
+      <span class="status-dot" id="healthDot"></span>
+      <span id="healthText">Checking...</span>
+      <span id="userDisplay" style="margin-left:16px;color:#94a3b8;font-size:0.85rem;"></span>
+      <button class="btn btn-xs btn-secondary" id="logoutBtn" style="margin-left:8px;display:none" onclick="handleLogout()">Logout</button>
+    </div>
+  </nav>
+
+  <div class="container">
+    <!-- Stats Cards -->
+    <div class="stats-row">
+      <div class="stat-card"><span class="stat-num" id="statRoutes">0</span> Routes</div>
+      <div class="stat-card"><span class="stat-num" id="statActive">0</span> Active</div>
+      <div class="stat-card"><span class="stat-num" id="statRequests">0</span> Requests</div>
+    </div>
+
+    <!-- Routes Section -->
+    <div class="section">
+      <div class="section-header">
+        <h2>🗺️ Routes</h2>
+        <button class="btn btn-sm" onclick="showAddRoute()">+ Add Route</button>
+      </div>
+      <table id="routesTable">
+        <thead>
+          <tr>
+            <th>Path</th>
+            <th>Name</th>
+            <th>Target</th>
+            <th>Status</th>
+            <th>Rewrite</th>
+            <th>Open</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="routesBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Request Log -->
+    <div class="section">
+      <div class="section-header">
+        <h2>📋 Recent Requests</h2>
+        <button class="btn btn-sm" onclick="fetchLog()">Refresh</button>
+      </div>
+      <div class="log-container" id="logContainer">
+        <div class="log-empty">No requests yet</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Route Modal -->
+  <div class="modal-overlay" id="routeModal" style="display:none">
+    <div class="modal">
+      <h3>Add / Edit Route</h3>
+      <input type="text" id="routePath" placeholder="Path (e.g. /my-app, /api/books)" />
+      <input type="text" id="routeTarget" placeholder="Target (e.g. http://host.docker.internal:4000)" />
+      <input type="text" id="routeName" placeholder="Name (e.g. My App)" />
+      <input type="text" id="routeDesc" placeholder="Description (optional)" />
+      <label style="display:flex;align-items:center;gap:8px;margin:8px 0 12px;color:#94a3b8;font-size:0.85rem;cursor:pointer">
+        <input type="checkbox" id="routeRewriteHtml" style="width:auto" />
+        Rewrite HTML asset paths (for proxying UI apps)
+      </label>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn" onclick="saveRoute()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

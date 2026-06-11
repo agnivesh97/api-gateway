@@ -1,0 +1,28 @@
+{
+  "routes": [
+    {
+      "path": "/api/users",
+      "target": "http://service-a:3001",
+      "name": "Users Service",
+      "description": "User management API",
+      "enabled": true,
+      "rewriteHtml": false
+    },
+    {
+      "path": "/api/orders",
+      "target": "http://service-b:3002",
+      "name": "Orders Service",
+      "description": "Order management API",
+      "enabled": true,
+      "rewriteHtml": false
+    },
+    {
+      "path": "/pdf",
+      "target": "http://host.docker.internal:8089",
+      "name": "Stirling PDF",
+      "description": "PDF manipulation tools (UI app with assets)",
+      "enabled": true,
+      "rewriteHtml": true
+    }
+  ]
+}
