@@ -83,7 +83,7 @@ app.get('/__gw/routes', (req, res) => {
 
 // --- API: Add/update a route ---
 app.post('/__gw/routes', (req, res) => {
-  const { path: routePath, target, name, description, rewriteHtml } = req.body;
+  const { path: routePath, target, name, description, rewriteHtml, preservePath } = req.body;
   if (!routePath || !target) {
     return res.status(400).json({ error: 'path and target are required' });
   }
@@ -96,6 +96,7 @@ app.post('/__gw/routes', (req, res) => {
     description: description || '',
     enabled: true,
     rewriteHtml: rewriteHtml === true,
+    preservePath: preservePath === true,
   };
   if (existing >= 0) {
     routes[existing] = { ...routes[existing], ...newRoute };
@@ -169,13 +170,15 @@ function rebuildProxies() {
     const handleHtmlRewrite = route.rewriteHtml === true;
 
     // Path rewrite logic:
-    // - API routes (rewriteHtml: false): strip /api → keep /users
-    //   e.g. /api/users/1 → /users/1
-    // - UI routes (rewriteHtml: true): strip entire prefix
-    //   e.g. /api/pdf/ → /  or  /api/pdf/css/style.css → /css/style.css
+    // - preservePath: keep the original path as-is (for backends that use the same path)
+    // - rewriteHtml (true): strip entire prefix (e.g. /photos → /)
+    // - rewriteHtml (false): strip only first segment (e.g. /api/users → /users)
     const pathParts = route.path.split('/').filter(Boolean);
     let rewriteRule;
-    if (handleHtmlRewrite) {
+    if (route.preservePath) {
+      // Keep the path exactly as-is — no rewrite
+      rewriteRule = {};
+    } else if (handleHtmlRewrite) {
       // Strip the entire route prefix for UI apps mounted at a sub-path
       rewriteRule = { [`^${route.path}`]: '' };
     } else {
@@ -197,6 +200,12 @@ function rebuildProxies() {
       pathRewrite: rewriteRule,
       onProxyReq: (proxyReq, req, res) => {
         logRequest(req, res, route.target);
+        // Re-attach body if express.json() already consumed the stream
+        if (req.body && Object.keys(req.body).length > 0) {
+          const bodyStr = JSON.stringify(req.body);
+          proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyStr));
+          proxyReq.write(bodyStr);
+        }
       },
       onError: (err, req, res) => {
         console.error(`Proxy error for ${req.path}:`, err.message);

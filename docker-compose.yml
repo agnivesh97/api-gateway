@@ -11,6 +11,7 @@ services:
     depends_on:
       - service-a
       - service-b
+      - photo-organizer
     restart: unless-stopped
 
   # --- Demo Backend Services ---
@@ -20,4 +21,20 @@ services:
 
   service-b:
     build: ./service-b
+    restart: unless-stopped
+
+  # --- Google Drive Photo Organizer ---
+  photo-organizer:
+    build: /home/agniveshtiwari9/.openclaw/workspace/google-drive-photo-organizer
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persist SQLite database outside Docker
+      - /home/agniveshtiwari9/.openclaw/workspace/google-drive-photo-organizer/database.sqlite:/app/database.sqlite
+      - /home/agniveshtiwari9/.openclaw/workspace/google-drive-photo-organizer/database.sqlite-wal:/app/database.sqlite-wal
+      - /home/agniveshtiwari9/.openclaw/workspace/google-drive-photo-organizer/database.sqlite-shm:/app/database.sqlite-shm
+      # Config
+      - /home/agniveshtiwari9/.openclaw/workspace/google-drive-photo-organizer/.env:/app/.env
+      # Persist OAuth tokens (created after first auth)
+      - /home/agniveshtiwari9/.openclaw/workspace/google-drive-photo-organizer/tokens.json:/app/tokens.json
     restart: unless-stopped

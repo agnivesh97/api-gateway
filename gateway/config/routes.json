@@ -5,7 +5,7 @@
       "target": "http://service-a:3001",
       "name": "Users Service",
       "description": "User management API",
-      "enabled": true,
+      "enabled": false,
       "rewriteHtml": false
     },
     {
@@ -13,7 +13,7 @@
       "target": "http://service-b:3002",
       "name": "Orders Service",
       "description": "Order management API",
-      "enabled": true,
+      "enabled": false,
       "rewriteHtml": false
     },
     {
@@ -21,6 +21,86 @@
       "target": "http://host.docker.internal:8089",
       "name": "Stirling PDF",
       "description": "PDF manipulation tools (UI app with assets)",
+      "enabled": true,
+      "rewriteHtml": true
+    },
+    {
+      "path": "/api/reprocess",
+      "target": "http://photo-organizer:3000",
+      "name": "Photo Organizer - Reprocess",
+      "description": "Re-hash all files in a folder from scratch",
+      "enabled": true,
+      "rewriteHtml": false,
+      "preservePath": true
+    },
+    {
+      "path": "/api/folders",
+      "target": "http://photo-organizer:3000",
+      "name": "Photo Organizer - Folders",
+      "description": "List/add/delete saved Drive folders",
+      "enabled": true,
+      "rewriteHtml": false,
+      "preservePath": true
+    },
+    {
+      "path": "/api/process",
+      "target": "http://photo-organizer:3000",
+      "name": "Photo Organizer - Process",
+      "description": "Start/poll photo processing",
+      "enabled": true,
+      "rewriteHtml": false,
+      "preservePath": true
+    },
+    {
+      "path": "/api/clusters",
+      "target": "http://photo-organizer:3000",
+      "name": "Photo Organizer - Clusters",
+      "description": "Cluster data and decisions",
+      "enabled": true,
+      "rewriteHtml": false,
+      "preservePath": true
+    },
+    {
+      "path": "/api/stats",
+      "target": "http://photo-organizer:3000",
+      "name": "Photo Organizer - Stats",
+      "description": "Processing statistics",
+      "enabled": true,
+      "rewriteHtml": false,
+      "preservePath": true
+    },
+    {
+      "path": "/api/file",
+      "target": "http://photo-organizer:3000",
+      "name": "Photo Organizer - Files",
+      "description": "File thumbnail/download URLs",
+      "enabled": true,
+      "rewriteHtml": false,
+      "preservePath": true
+    },
+    {
+      "path": "/api/finalize",
+      "target": "http://photo-organizer:3000",
+      "name": "Photo Organizer - Finalize",
+      "description": "ZIP download of selected photos",
+      "enabled": true,
+      "rewriteHtml": false,
+      "preservePath": true
+    },
+    {
+      "path": "/api/drive",
+      "target": "http://photo-organizer:3000",
+      "name": "Photo Organizer - Drive",
+      "description": "Google Drive auth status and folder listing",
+      "enabled": true,
+      "rewriteHtml": false,
+      "preservePath": true
+    },
+    {
+      "path": "/photos",
+      "target": "http://photo-organizer:3000",
+      "name": "Photo Organizer UI",
+      "description": "Google Drive Photo Organizer web interface",
       "enabled": true,
       "rewriteHtml": true
     }
