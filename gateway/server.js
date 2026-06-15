@@ -218,6 +218,38 @@ app.get('/_gw/config', (req, res) => {
   res.json(result);
 });
 
+/**
+ * POST /_gw/config
+ * Allows a proxied service to push configs back to the gateway (e.g. refreshed OAuth tokens).
+ * Authenticated by X-Service-Id header.
+ */
+app.post('/_gw/config', express.json(), (req, res) => {
+  const serviceId = req.headers['x-service-id'];
+  if (!serviceId) {
+    return res.status(400).json({ error: 'X-Service-Id header required' });
+  }
+  const service = getServices().find(s => s.id === serviceId || s.name === serviceId);
+  if (!service) {
+    return res.status(404).json({ error: 'Service not found' });
+  }
+  const { configs } = req.body;
+  if (!configs || typeof configs !== 'object') {
+    return res.status(400).json({ error: 'configs object required' });
+  }
+  try {
+    Object.entries(configs).forEach(([key, value]) => {
+      const strVal = typeof value === 'string' ? value : JSON.stringify(value);
+      // Auto-detect if it looks like a secret
+      const isSecret = strVal.length > 8 && !strVal.startsWith('file:') && !strVal.startsWith('http');
+      const storedVal = isSecret ? encrypt(strVal) : strVal;
+      upsertConfig(service.id, key, storedVal, isSecret);
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
 // ============================================================
 // Unprotected routes
 // ============================================================
