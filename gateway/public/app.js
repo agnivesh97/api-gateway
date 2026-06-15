@@ -124,7 +124,7 @@ async function deleteDetailService() {
   const s = servicesCache.find(x => x.id === currentServiceId);
   if (!s || !confirm(`Delete service "${s.name}"?`)) return;
   const res = await authFetch(`${API}/services/${currentServiceId}`, { method: 'DELETE' });
-  if (res) { closeServiceDetail(); fetchServices(); populateServiceDropdowns(); }
+  if (res) { closeServiceDetail(); fetchServices(); }
 }
 
 function editDetailService() {
@@ -197,7 +197,7 @@ async function saveService() {
       rewrite_html: document.getElementById('serviceRewriteHtml').checked === true,
     }),
   });
-  if (res) { closeModal('serviceModal'); fetchServices(); populateServiceDropdowns(); }
+  if (res) { closeModal('serviceModal'); fetchServices(); }
 }
 
 async function migrateRoutes() {
