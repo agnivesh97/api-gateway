@@ -146,6 +146,55 @@ async function fetchServices() {
   servicesCache = services;
   renderServices(services);
   document.getElementById('statServices').textContent = services.length;
+  renderApps(services);
+}
+
+function renderApps(services) {
+  const container = document.getElementById('appsContainer');
+  if (!container) return;
+  const enabledServices = services.filter(s => s.enabled);
+  if (enabledServices.length === 0) {
+    container.innerHTML = '<div class="log-empty">No active apps. Register one in the Services tab.</div>';
+    return;
+  }
+  container.innerHTML = enabledServices.map(s => `
+    <div class="service-card">
+      <div class="service-header">
+        <span class="service-name">${s.name}</span>
+        <span class="badge on">Active</span>
+      </div>
+      <div class="service-details">
+        <div><span class="label">URL:</span> <code>${window.location.origin}${s.prefix}</code></div>
+        <div><span class="label">Target:</span> <code>${s.target}</code></div>
+        <div><span class="label">Description:</span> ${s.description || '-'}</div>
+      </div>
+      <div class="service-actions">
+        <button class="btn btn-primary" onclick="openApp('${s.prefix}', '${s.name}')" style="padding:8px 20px;font-size:0.9rem">🚀 Open</button>
+        <button class="btn btn-xs btn-secondary" onclick="window.open('${s.prefix}', '_blank')">↗️ New Tab</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function openApp(prefix, name) {
+  const viewer = document.getElementById('appViewer');
+  const frame = document.getElementById('appViewerFrame');
+  const title = document.getElementById('appViewerTitle');
+  if (viewer && frame && title) {
+    title.textContent = name || 'App';
+    frame.src = prefix;
+    viewer.style.display = 'block';
+    viewer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function closeAppViewer() {
+  const viewer = document.getElementById('appViewer');
+  const frame = document.getElementById('appViewerFrame');
+  if (viewer && frame) {
+    frame.src = 'about:blank';
+    viewer.style.display = 'none';
+  }
 }
 
 function renderServices(services) {
@@ -171,7 +220,8 @@ function renderServices(services) {
         <div><span class="label">Created:</span> <span style="color:#94a3b8;font-size:0.8rem">${s.created_at || '-'}</span></div>
       </div>
       <div class="service-actions">
-        <button class="btn btn-xs btn-primary" onclick="window.open('${s.prefix}', '_blank')">🚀 Open</button>
+        <button class="btn btn-xs btn-primary" onclick="openApp('${s.prefix}', '${s.name}')">🚀 Open</button>
+        <button class="btn btn-xs btn-secondary" onclick="window.open('${s.prefix}', '_blank')">↗️ New Tab</button>
         <button class="btn btn-xs btn-secondary" onclick="editService('${s.id}')">✏️ Edit</button>
         <button class="btn btn-xs ${s.enabled ? 'btn-secondary' : 'btn'}" onclick="toggleService('${s.id}')">${s.enabled ? 'Disable' : 'Enable'}</button>
         <button class="btn btn-xs btn-danger" onclick="deleteService('${s.id}')">Delete</button>
@@ -571,6 +621,40 @@ async function checkHealth() {
     document.getElementById('healthDot').className = 'status-dot err';
     document.getElementById('healthText').textContent = 'Disconnected';
   }
+}
+
+// ============================================================
+// ACTIVITY LOG
+// ============================================================
+async function fetchActivityLog() {
+  const res = await authFetch(`${API}/activity`);
+  if (!res) return;
+  const { activity } = await res.json();
+  renderActivityLog(activity);
+}
+
+function renderActivityLog(activity) {
+  const container = document.getElementById('activityLogContainer');
+  if (!container) return;
+  if (activity.length === 0) {
+    container.innerHTML = '<div class="log-empty">No activity yet. Make changes to routes, services, or configs and they\'ll appear here.</div>';
+    return;
+  }
+  container.innerHTML = activity.map(a => {
+    const icons = {
+      'route.create': '➕', 'route.update': '✏️', 'route.delete': '🗑️', 'route.toggle': '🔀',
+      'service.create': '➕', 'service.update': '✏️', 'service.delete': '🗑️', 'service.toggle': '🔀', 'service.migrate': '🔄',
+      'config.update': '🔐', 'config.delete': '🗑️',
+      'container.restart': '🔄', 'container.start': '▶️', 'container.stop': '⏹️',
+    };
+    const icon = icons[a.action] || '📋';
+    return `<div class="log-entry">
+      <span style="margin-right:8px">${icon}</span>
+      <span style="color:#a78bfa;font-weight:600;font-size:0.75rem">${a.action}</span>
+      <span style="color:#94a3b8;margin:0 8px">${a.detail || ''}</span>
+      <span style="color:#475569;font-size:0.7rem;margin-left:auto;white-space:nowrap">${new Date(a.ts).toLocaleTimeString()}</span>
+    </div>`;
+  }).join('');
 }
 
 // ============================================================

@@ -145,6 +145,7 @@ function decrypt(encryptedText) {
 // In-memory request log (legacy)
 // ============================================================
 const requestLog = [];
+const activityLog = [];
 const MAX_LOG = 100;
 
 // ============================================================
@@ -171,6 +172,15 @@ function logRequest(req, res, target) {
     status: res.statusCode,
   });
   if (requestLog.length > MAX_LOG) requestLog.pop();
+}
+
+function logActivity(action, detail) {
+  activityLog.unshift({
+    ts: new Date().toISOString(),
+    action,
+    detail,
+  });
+  if (activityLog.length > MAX_LOG) activityLog.pop();
 }
 
 // ============================================================
@@ -265,8 +275,10 @@ app.post('/__gw/routes', (req, res) => {
   };
   if (existing >= 0) {
     routes[existing] = { ...routes[existing], ...newRoute };
+    logActivity('route.update', `Updated route ${routePath} → ${target}`);
   } else {
     routes.push(newRoute);
+    logActivity('route.create', `Created route ${routePath} → ${target}`);
   }
   saveRoutes(routes);
   rebuildProxies();
@@ -279,6 +291,7 @@ app.delete('/__gw/routes/:encodedPath', (req, res) => {
   routes = routes.filter(r => r.path !== routePath);
   saveRoutes(routes);
   rebuildProxies();
+  logActivity('route.delete', `Deleted route ${routePath}`);
   res.json({ routes });
 });
 
@@ -290,6 +303,7 @@ app.patch('/__gw/routes/:encodedPath/toggle', (req, res) => {
   route.enabled = !route.enabled;
   saveRoutes(routes);
   rebuildProxies();
+  logActivity('route.toggle', `${route.enabled ? 'Enabled' : 'Disabled'} route ${routePath}`);
   res.json({ routes });
 });
 
@@ -333,6 +347,7 @@ app.post('/__gw/services', (req, res) => {
     };
     addService(service);
     rebuildServiceProxies();
+    logActivity('service.create', `Registered service "${name}" at ${prefix} → ${target}`);
     res.json({ service });
   } catch (err) {
     if (err.message.startsWith('UNIQUE:')) {
@@ -378,6 +393,7 @@ app.put('/__gw/services/:id', (req, res) => {
     if (!updated) return res.status(404).json({ error: 'Service not found' });
 
     rebuildServiceProxies();
+    logActivity('service.update', `Updated service "${updated.name}"`);
     res.json({ service: updated });
   } catch (err) {
     if (err.message.startsWith('UNIQUE:')) {
@@ -390,10 +406,12 @@ app.put('/__gw/services/:id', (req, res) => {
 // --- Delete service ---
 app.delete('/__gw/services/:id', (req, res) => {
   try {
+    const svc = getService(req.params.id);
     if (!deleteService(req.params.id)) {
       return res.status(404).json({ error: 'Service not found' });
     }
     rebuildServiceProxies();
+    logActivity('service.delete', `Deleted service "${svc?.name}"`);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -405,8 +423,10 @@ app.patch('/__gw/services/:id/toggle', (req, res) => {
   try {
     const service = getService(req.params.id);
     if (!service) return res.status(404).json({ error: 'Service not found' });
-    const updated = updateService(req.params.id, { enabled: service.enabled ? 0 : 1 });
+    const newEnabled = service.enabled ? 0 : 1;
+    const updated = updateService(req.params.id, { enabled: newEnabled });
     rebuildServiceProxies();
+    logActivity('service.toggle', `${newEnabled ? 'Enabled' : 'Disabled'} service "${service.name}"`);
     res.json({ service: updated });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -452,6 +472,7 @@ app.post('/__gw/services/migrate', (req, res) => {
     });
 
     rebuildServiceProxies();
+    logActivity('service.migrate', `Migrated ${created} route groups to services`);
     res.json({ created, total: Object.keys(groups).length });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -494,6 +515,7 @@ app.put('/__gw/services/:id/config', (req, res) => {
       ...c,
       value: c.is_secret ? '••••••••' : c.value,
     }));
+    logActivity('config.update', `Updated configs for service "${service.name}": ${Object.keys(configs).join(', ')}`);
     res.json({ configs: updated });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -505,6 +527,7 @@ app.delete('/__gw/services/:id/config/:key', (req, res) => {
   const service = getService(req.params.id);
   if (!service) return res.status(404).json({ error: 'Service not found' });
   deleteConfig(service.id, req.params.key);
+  logActivity('config.delete', `Deleted config "${req.params.key}" from "${service.name}"`);
   res.json({ ok: true });
 });
 
@@ -553,7 +576,9 @@ app.post('/__gw/services/:id/container/restart', async (req, res) => {
   try {
     const result = await getContainer(req.params.id);
     if (!result) return res.status(404).json({ error: 'Container not found' });
+    const svc = getService(req.params.id);
     await result.container.restart();
+    logActivity('container.restart', `Restarted container for "${svc?.name}"`);
     res.json({ ok: true, message: 'Container restarted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -565,7 +590,9 @@ app.post('/__gw/services/:id/container/start', async (req, res) => {
   try {
     const result = await getContainer(req.params.id);
     if (!result) return res.status(404).json({ error: 'Container not found' });
+    const svc = getService(req.params.id);
     await result.container.start();
+    logActivity('container.start', `Started container for "${svc?.name}"`);
     res.json({ ok: true, message: 'Container started' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -577,7 +604,9 @@ app.post('/__gw/services/:id/container/stop', async (req, res) => {
   try {
     const result = await getContainer(req.params.id);
     if (!result) return res.status(404).json({ error: 'Container not found' });
+    const svc = getService(req.params.id);
     await result.container.stop();
+    logActivity('container.stop', `Stopped container for "${svc?.name}"`);
     res.json({ ok: true, message: 'Container stopped' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -619,6 +648,10 @@ app.get('/__gw/log', (req, res) => {
 
 app.get('/__gw/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+app.get('/__gw/activity', (req, res) => {
+  res.json({ activity: activityLog });
 });
 
 app.post('/__gw/logout', (req, res) => {
