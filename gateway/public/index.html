@@ -17,47 +17,160 @@
     </div>
   </nav>
 
+  <!-- Tab Navigation -->
+  <div class="tabs-bar">
+    <button class="tab-btn active" data-tab="routes" onclick="switchTab('routes')">🗺️ Routes</button>
+    <button class="tab-btn" data-tab="services" onclick="switchTab('services')">📦 Services</button>
+    <button class="tab-btn" data-tab="config" onclick="switchTab('config')">🔐 Config</button>
+    <button class="tab-btn" data-tab="container" onclick="switchTab('container')">🐳 Container</button>
+  </div>
+
   <div class="container">
-    <!-- Stats Cards -->
+
+    <!-- Stats Cards (visible on all tabs) -->
     <div class="stats-row">
       <div class="stat-card"><span class="stat-num" id="statRoutes">0</span> Routes</div>
       <div class="stat-card"><span class="stat-num" id="statActive">0</span> Active</div>
+      <div class="stat-card"><span class="stat-num" id="statServices">0</span> Services</div>
       <div class="stat-card"><span class="stat-num" id="statRequests">0</span> Requests</div>
     </div>
 
-    <!-- Routes Section -->
-    <div class="section">
-      <div class="section-header">
-        <h2>🗺️ Routes</h2>
-        <button class="btn btn-sm" onclick="showAddRoute()">+ Add Route</button>
+    <!-- ============ ROUTES TAB ============ -->
+    <div class="tab-content" id="tab-routes">
+      <div class="section">
+        <div class="section-header">
+          <h2>🗺️ Routes</h2>
+          <button class="btn btn-sm" onclick="showAddRoute()">+ Add Route</button>
+        </div>
+        <table id="routesTable">
+          <thead>
+            <tr>
+              <th>Path</th>
+              <th>Name</th>
+              <th>Target</th>
+              <th>Status</th>
+              <th>Rewrite</th>
+              <th>Open</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="routesBody"></tbody>
+        </table>
       </div>
-      <table id="routesTable">
-        <thead>
-          <tr>
-            <th>Path</th>
-            <th>Name</th>
-            <th>Target</th>
-            <th>Status</th>
-            <th>Rewrite</th>
-            <th>Open</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="routesBody"></tbody>
-      </table>
+
+      <!-- Request Log -->
+      <div class="section">
+        <div class="section-header">
+          <h2>📋 Recent Requests</h2>
+          <button class="btn btn-sm" onclick="fetchLog()">Refresh</button>
+        </div>
+        <div class="log-container" id="logContainer">
+          <div class="log-empty">No requests yet</div>
+        </div>
+      </div>
     </div>
 
-    <!-- Request Log -->
-    <div class="section">
-      <div class="section-header">
-        <h2>📋 Recent Requests</h2>
-        <button class="btn btn-sm" onclick="fetchLog()">Refresh</button>
-      </div>
-      <div class="log-container" id="logContainer">
-        <div class="log-empty">No requests yet</div>
+    <!-- ============ SERVICES TAB ============ -->
+    <div class="tab-content" id="tab-services" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <h2>📦 Service Registry</h2>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm btn-secondary" onclick="migrateRoutes()">🔄 Migrate Routes</button>
+            <button class="btn btn-sm" onclick="showAddService()">+ Add Service</button>
+          </div>
+        </div>
+        <div class="services-container" id="servicesContainer">
+          <div class="log-empty">No services registered.</div>
+        </div>
       </div>
     </div>
+
+    <!-- ============ CONFIG TAB ============ -->
+    <div class="tab-content" id="tab-config" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <h2>🔐 Service Configurations</h2>
+        </div>
+        <p style="color:#64748b;margin-bottom:16px;font-size:0.9rem">Select a service to view and manage its configuration keys.</p>
+        <div id="configServiceSelect">
+          <select id="configServiceDropdown" onchange="loadConfigs()" style="width:100%;padding:10px 12px;margin-bottom:16px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:0.9rem">
+            <option value="">-- Select a service --</option>
+          </select>
+        </div>
+        <div id="configPanel" style="display:none">
+          <div class="section-header">
+            <h3 id="configServiceName">Configurations</h3>
+            <button class="btn btn-sm" onclick="showAddConfig()">+ Add Config</button>
+          </div>
+          <table id="configsTable">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Value</th>
+                <th>Type</th>
+                <th>Updated</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="configsBody"></tbody>
+          </table>
+          <div style="margin-top:16px">
+            <h4 style="color:#94a3b8;margin-bottom:8px">Bulk Import JSON</h4>
+            <textarea id="configBulkInput" rows="4" style="width:100%;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-family:monospace;font-size:0.8rem" placeholder='{"GOOGLE_CLIENT_ID": "xxx", "DB_URL": "file:/app/data.db"}'></textarea>
+            <button class="btn btn-sm" onclick="bulkImportConfigs()" style="margin-top:8px">Import JSON</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ CONTAINER TAB ============ -->
+    <div class="tab-content" id="tab-container" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <h2>🐳 Container Management</h2>
+        </div>
+        <p style="color:#64748b;margin-bottom:16px;font-size:0.9rem">Manage Docker containers for registered services.</p>
+        <div id="containerServiceSelect">
+          <select id="containerServiceDropdown" onchange="loadContainer()" style="width:100%;padding:10px 12px;margin-bottom:16px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:0.9rem">
+            <option value="">-- Select a service --</option>
+          </select>
+        </div>
+        <div id="containerPanel" style="display:none">
+          <div class="container-status-card" id="containerStatusCard">
+            <div class="container-status-header">
+              <span id="containerName" style="font-weight:700;font-size:1.1rem">-</span>
+              <span class="badge" id="containerStatusBadge">Unknown</span>
+            </div>
+            <div class="container-details">
+              <div><span class="label">Container ID:</span> <code id="containerId">-</code></div>
+              <div><span class="label">Image:</span> <code id="containerImage">-</code></div>
+              <div><span class="label">State:</span> <span id="containerState">-</span></div>
+              <div><span class="label">Ports:</span> <code id="containerPorts">-</code></div>
+            </div>
+            <div class="container-actions" style="margin-top:16px;display:flex;gap:8px">
+              <button class="btn btn-sm" id="containerRestartBtn" onclick="containerAction('restart')">🔄 Restart</button>
+              <button class="btn btn-sm btn-secondary" id="containerStartBtn" onclick="containerAction('start')">▶️ Start</button>
+              <button class="btn btn-sm btn-danger" id="containerStopBtn" onclick="containerAction('stop')">⏹️ Stop</button>
+              <button class="btn btn-sm btn-secondary" id="containerLogsBtn" onclick="loadContainerLogs()">📋 Logs</button>
+            </div>
+          </div>
+          <div id="containerLogsPanel" style="margin-top:16px;display:none">
+            <div class="section-header">
+              <h4 style="color:#94a3b8">Recent Logs</h4>
+              <button class="btn btn-xs btn-secondary" onclick="loadContainerLogs()">Refresh</button>
+            </div>
+            <div class="log-container" id="containerLogsContent">
+              <div class="log-empty">Loading logs...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
+
+  <!-- ============ MODALS ============ -->
 
   <!-- Add Route Modal -->
   <div class="modal-overlay" id="routeModal" style="display:none">
@@ -72,8 +185,45 @@
         Rewrite HTML asset paths (for proxying UI apps)
       </label>
       <div class="modal-actions">
-        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-secondary" onclick="closeModal('routeModal')">Cancel</button>
         <button class="btn" onclick="saveRoute()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Service Modal -->
+  <div class="modal-overlay" id="serviceModal" style="display:none">
+    <div class="modal">
+      <h3>Register Service</h3>
+      <input type="text" id="serviceName" placeholder="Service name (e.g. my-app)" />
+      <input type="text" id="servicePrefix" placeholder="Prefix (e.g. /my-app)" />
+      <input type="text" id="serviceTarget" placeholder="Target (e.g. http://my-app:4000)" />
+      <input type="text" id="serviceDocker" placeholder="Docker service name (for restart/stop)" />
+      <input type="text" id="serviceDesc" placeholder="Description (optional)" />
+      <label style="display:flex;align-items:center;gap:8px;margin:8px 0 12px;color:#94a3b8;font-size:0.85rem;cursor:pointer">
+        <input type="checkbox" id="serviceRewriteHtml" style="width:auto" />
+        Rewrite HTML asset paths (for proxying UI apps)
+      </label>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeModal('serviceModal')">Cancel</button>
+        <button class="btn" onclick="saveService()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Config Modal -->
+  <div class="modal-overlay" id="configModal" style="display:none">
+    <div class="modal">
+      <h3>Add Configuration</h3>
+      <input type="text" id="configKey" placeholder="Key (e.g. DB_URL, GOOGLE_TOKEN)" />
+      <input type="text" id="configValue" placeholder="Value" />
+      <label style="display:flex;align-items:center;gap:8px;margin:8px 0 12px;color:#94a3b8;font-size:0.85rem;cursor:pointer">
+        <input type="checkbox" id="configIsSecret" style="width:auto" checked />
+        Encrypt this value (secret)
+      </label>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeModal('configModal')">Cancel</button>
+        <button class="btn" onclick="saveConfig()">Save</button>
       </div>
     </div>
   </div>

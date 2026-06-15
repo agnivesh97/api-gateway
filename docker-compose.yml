@@ -6,6 +6,8 @@ services:
       - "8081:8080"
     volumes:
       - ./gateway/config:/app/config
+      - ./gateway/data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
