@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 8080;
 const CONFIG_PATH = path.join(__dirname, 'config', 'routes.json');
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const DB_PATH = path.join(DATA_DIR, 'gateway.json');
-const ENCRYPTION_KEY = process.env.GW_ENCRYPTION_KEY || 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4'; // 32 hex chars
+const ENCRYPTION_KEY = process.env.GW_ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex'); // 64 hex chars = 32 bytes for AES-256
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -595,7 +595,16 @@ app.get('/__gw/services/:id/container/logs', async (req, res) => {
       tail: 50,
       timestamps: false,
     });
-    res.json({ logs: logs.toString('utf-8').split('\n').filter(Boolean) });
+    // Strip Docker stream headers (1-byte type + 3-byte pad + 4-byte length) from each chunk
+    const raw = logs.toString('utf-8');
+    const lines = raw.split('\n').filter(Boolean).map(line => {
+      // Docker multiplexed stream: first 8 bytes are header, rest is content
+      if (line.length > 8 && /^[\x00-\x02]/.test(line)) {
+        return line.substring(8);
+      }
+      return line;
+    });
+    res.json({ logs: lines });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
