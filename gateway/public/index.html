@@ -12,226 +12,154 @@
     <div class="nav-status">
       <span class="status-dot" id="healthDot"></span>
       <span id="healthText">Checking...</span>
-      <span id="userDisplay" style="margin-left:16px;color:#94a3b8;font-size:0.85rem;"></span>
+      <span id="userDisplay" style="margin-left:16px;color:#94a3b8"></span>
       <button class="btn btn-xs btn-secondary" id="logoutBtn" style="margin-left:8px;display:none" onclick="handleLogout()">Logout</button>
     </div>
   </nav>
 
-  <!-- Tab Navigation -->
-  <div class="tabs-bar">
-    <button class="tab-btn active" data-tab="apps" onclick="switchTab('apps')">🏠 Apps</button>
-    <button class="tab-btn" data-tab="services" onclick="switchTab('services')">📦 Services</button>
-    <button class="tab-btn" data-tab="config" onclick="switchTab('config')">🔐 Config</button>
-    <button class="tab-btn" data-tab="container" onclick="switchTab('container')">🐳 Container</button>
-    <button class="tab-btn" data-tab="routes" onclick="switchTab('routes')">🗺️ Routes</button>
-    <button class="tab-btn" data-tab="activity" onclick="switchTab('activity'); fetchActivityLog()">📋 Activity</button>
-  </div>
-
   <div class="container">
 
-    <!-- Stats Cards (visible on all tabs) -->
+    <!-- Stats -->
     <div class="stats-row">
+      <div class="stat-card"><span class="stat-num" id="statServices">0</span> Services</div>
       <div class="stat-card"><span class="stat-num" id="statRoutes">0</span> Routes</div>
-      <div class="stat-card"><span class="stat-num" id="statServices">0</span> Services</div>
-      <div class="stat-card"><span class="stat-num" id="statActive">0</span> Active Routes</div>
-      <div class="stat-card"><span class="stat-num" id="statServices">0</span> Services</div>
+      <div class="stat-card"><span class="stat-num" id="statActive">0</span> Active</div>
       <div class="stat-card"><span class="stat-num" id="statRequests">0</span> Requests</div>
     </div>
 
-    <!-- ============ ROUTES TAB ============ -->
-    <div class="tab-content" id="tab-routes">
+    <!-- ============ SERVICE LIST ============ -->
+    <div class="section" id="serviceListSection">
+      <div class="section-header">
+        <h2>📦 Services</h2>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-secondary" onclick="migrateRoutes()">🔄 Migrate Routes</button>
+          <button class="btn btn-sm" onclick="showAddService()">+ Add Service</button>
+        </div>
+      </div>
+      <div class="services-container" id="servicesContainer">
+        <div class="log-empty">No services registered.</div>
+      </div>
+    </div>
+
+    <!-- ============ SERVICE DETAIL (hidden until a service is clicked) ============ -->
+    <div id="serviceDetail" style="display:none">
       <div class="section">
         <div class="section-header">
-          <h2>🗺️ Routes</h2>
-          <button class="btn btn-sm" onclick="showAddRoute()">+ Add Route</button>
+          <div style="display:flex;align-items:center;gap:12px">
+            <button class="btn btn-xs btn-secondary" onclick="closeServiceDetail()" style="font-size:1.2rem">← Back</button>
+            <h2 id="detailServiceName" style="margin:0">Service</h2>
+            <span class="badge" id="detailStatusBadge">Unknown</span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm btn-primary" id="detailOpenBtn" onclick="openApp()">🚀 Open</button>
+            <button class="btn btn-xs btn-secondary" id="detailNewTabBtn" onclick="openAppNewTab()">↗️ New Tab</button>
+          </div>
         </div>
-        <table id="routesTable">
+
+        <!-- Service Info -->
+        <div class="detail-grid">
+          <div class="detail-field"><span class="label">Prefix:</span> <code id="detailPrefix">-</code></div>
+          <div class="detail-field"><span class="label">Target:</span> <code id="detailTarget">-</code></div>
+          <div class="detail-field"><span class="label">Docker:</span> <code id="detailDocker">-</code></div>
+          <div class="detail-field"><span class="label">Description:</span> <span id="detailDesc">-</span></div>
+          <div class="detail-field"><span class="label">Created:</span> <span id="detailCreated">-</span></div>
+          <div class="detail-field">
+            <span class="label">Enabled:</span>
+            <button class="btn btn-xs" id="detailToggleBtn" onclick="toggleDetailService()">Toggle</button>
+            <button class="btn btn-xs btn-danger" onclick="deleteDetailService()" style="margin-left:8px">Delete</button>
+            <button class="btn btn-xs btn-secondary" onclick="editDetailService()" style="margin-left:4px">✏️ Edit</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- App Viewer (embedded iframe) -->
+      <div id="detailAppViewer" style="display:none" class="section">
+        <div class="section-header">
+          <h3 style="margin:0">App Preview</h3>
+          <button class="btn btn-xs btn-secondary" onclick="closeAppViewer()">✕ Close</button>
+        </div>
+        <div class="app-viewer-frame">
+          <iframe id="detailAppFrame" src="about:blank" sandbox="allow-scripts allow-forms allow-same-origin allow-popups"></iframe>
+        </div>
+      </div>
+
+      <!-- Configuration -->
+      <div class="section">
+        <div class="section-header">
+          <h3>🔐 Configuration</h3>
+          <button class="btn btn-sm" onclick="showAddConfig()">+ Add Config</button>
+        </div>
+        <table id="detailConfigsTable">
           <thead>
-            <tr>
-              <th>Path</th>
-              <th>Name</th>
-              <th>Target</th>
-              <th>Status</th>
-              <th>Rewrite</th>
-              <th>Open</th>
-              <th>Actions</th>
-            </tr>
+            <tr><th>Key</th><th>Value</th><th>Type</th><th>Updated</th><th>Actions</th></tr>
           </thead>
-          <tbody id="routesBody"></tbody>
+          <tbody id="detailConfigsBody"></tbody>
         </table>
+        <div style="margin-top:12px">
+          <h4 style="color:#94a3b8;font-size:0.8rem;margin-bottom:6px">Bulk Import JSON</h4>
+          <textarea id="detailConfigBulk" rows="3" style="width:100%;padding:8px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-family:monospace;font-size:0.75rem" placeholder='{"DB_URL": "file:/app/data.db"}'></textarea>
+          <button class="btn btn-xs btn-secondary" onclick="bulkImportConfigs()" style="margin-top:6px">Import</button>
+        </div>
       </div>
 
-      <!-- Request Log -->
+      <!-- Container -->
       <div class="section">
         <div class="section-header">
-          <h2>📋 Recent Requests</h2>
-          <button class="btn btn-sm" onclick="fetchLog()">Refresh</button>
+          <h3>🐳 Container</h3>
         </div>
-        <div class="log-container" id="logContainer">
-          <div class="log-empty">No requests yet</div>
+        <div id="detailContainerContent">
+          <div class="log-empty">Loading container status...</div>
+        </div>
+      </div>
+
+      <!-- Activity for this service -->
+      <div class="section">
+        <div class="section-header">
+          <h3>📋 Recent Activity</h3>
+          <button class="btn btn-xs btn-secondary" onclick="loadDetailActivity()">Refresh</button>
+        </div>
+        <div class="log-container" id="detailActivityContent">
+          <div class="log-empty">No activity.</div>
         </div>
       </div>
     </div>
 
-    <!-- ============ APPS TAB (HOME) ============ -->
-    <div class="tab-content" id="tab-apps">
-      <div class="section">
-        <div class="section-header">
-          <h2>🏠 Your Apps</h2>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-sm" onclick="switchTab('services')">+ Add Service</button>
-          </div>
-        </div>
-        <p style="color:#64748b;margin-bottom:16px;font-size:0.9rem">Click "Open" to view an app here, or "New Tab" to open it in a separate window.</p>
-        <div class="services-container" id="appsContainer">
-          <div class="log-empty">No apps registered. Add one in the Services tab.</div>
-        </div>
+    <!-- ============ ROUTES SECTION ============ -->
+    <div class="section">
+      <div class="section-header">
+        <h2>🗺️ Routes</h2>
+        <button class="btn btn-sm" onclick="showAddRoute()">+ Add Route</button>
       </div>
-      <!-- App Viewer (iframe) -->
-      <div id="appViewer" style="display:none;margin-top:16px">
-        <div class="section">
-          <div class="section-header">
-            <div style="display:flex;align-items:center;gap:8px">
-              <h2 id="appViewerTitle" style="margin:0">App</h2>
-              <button class="btn btn-xs btn-secondary" id="appViewerNewTab" onclick="window.open(document.getElementById('appViewerFrame').src, '_blank')" style="font-size:0.75rem">↗️ Open in New Tab</button>
-            </div>
-            <button class="btn btn-sm btn-secondary" onclick="closeAppViewer()">✕ Close</button>
-          </div>
-          <div style="border:1px solid #334155;border-radius:8px;overflow:hidden;background:white;min-height:400px">
-            <iframe id="appViewerFrame" src="about:blank" style="width:100%;height:600px;border:none" sandbox="allow-scripts allow-forms allow-same-origin allow-popups"></iframe>
-          </div>
-        </div>
-      </div>
+      <table id="routesTable">
+        <thead>
+          <tr><th>Path</th><th>Name</th><th>Target</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="routesBody"></tbody>
+      </table>
     </div>
 
-    <!-- ============ SERVICES TAB ============ -->
-    <div class="tab-content" id="tab-services" style="display:none">
-      <div class="section">
-        <div class="section-header">
-          <h2>📦 Service Registry</h2>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-sm btn-secondary" onclick="migrateRoutes()">🔄 Migrate Routes</button>
-            <button class="btn btn-sm" onclick="showAddService()">+ Add Service</button>
-          </div>
-        </div>
-        <div class="services-container" id="servicesContainer">
-          <div class="log-empty">No services registered.</div>
-        </div>
+    <!-- ============ ACTIVITY SECTION ============ -->
+    <div class="section">
+      <div class="section-header">
+        <h2>📋 Activity Log</h2>
+        <button class="btn btn-sm btn-secondary" onclick="fetchActivityLog()">Refresh</button>
       </div>
-    </div>
-
-    <!-- ============ CONFIG TAB ============ -->
-    <div class="tab-content" id="tab-config" style="display:none">
-      <div class="section">
-        <div class="section-header">
-          <h2>🔐 Service Configurations</h2>
-        </div>
-        <p style="color:#64748b;margin-bottom:16px;font-size:0.9rem">Select a service to view and manage its configuration keys.</p>
-        <div id="configServiceSelect">
-          <select id="configServiceDropdown" onchange="loadConfigs()" style="width:100%;padding:10px 12px;margin-bottom:16px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:0.9rem">
-            <option value="">-- Select a service --</option>
-          </select>
-        </div>
-        <div id="configPanel" style="display:none">
-          <div class="section-header">
-            <h3 id="configServiceName">Configurations</h3>
-            <button class="btn btn-sm" onclick="showAddConfig()">+ Add Config</button>
-          </div>
-          <table id="configsTable">
-            <thead>
-              <tr>
-                <th>Key</th>
-                <th>Value</th>
-                <th>Type</th>
-                <th>Updated</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="configsBody"></tbody>
-          </table>
-          <div style="margin-top:16px">
-            <h4 style="color:#94a3b8;margin-bottom:8px">Bulk Import JSON</h4>
-            <textarea id="configBulkInput" rows="4" style="width:100%;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-family:monospace;font-size:0.8rem" placeholder='{"GOOGLE_CLIENT_ID": "xxx", "DB_URL": "file:/app/data.db"}'></textarea>
-            <button class="btn btn-sm" onclick="bulkImportConfigs()" style="margin-top:8px">Import JSON</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ============ CONTAINER TAB ============ -->
-    <div class="tab-content" id="tab-container" style="display:none">
-      <div class="section">
-        <div class="section-header">
-          <h2>🐳 Container Management</h2>
-        </div>
-        <p style="color:#64748b;margin-bottom:16px;font-size:0.9rem">Manage Docker containers for registered services.</p>
-        <div id="containerServiceSelect">
-          <select id="containerServiceDropdown" onchange="loadContainer()" style="width:100%;padding:10px 12px;margin-bottom:16px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:0.9rem">
-            <option value="">-- Select a service --</option>
-          </select>
-        </div>
-        <div id="containerPanel" style="display:none">
-          <div class="container-status-card" id="containerStatusCard">
-            <div class="container-status-header">
-              <span id="containerName" style="font-weight:700;font-size:1.1rem">-</span>
-              <span class="badge" id="containerStatusBadge">Unknown</span>
-            </div>
-            <div class="container-details">
-              <div><span class="label">Container ID:</span> <code id="containerId">-</code></div>
-              <div><span class="label">Image:</span> <code id="containerImage">-</code></div>
-              <div><span class="label">State:</span> <span id="containerState">-</span></div>
-              <div><span class="label">Ports:</span> <code id="containerPorts">-</code></div>
-            </div>
-            <div class="container-actions" style="margin-top:16px;display:flex;gap:8px">
-              <button class="btn btn-sm" id="containerRestartBtn" onclick="containerAction('restart')">🔄 Restart</button>
-              <button class="btn btn-sm btn-secondary" id="containerStartBtn" onclick="containerAction('start')">▶️ Start</button>
-              <button class="btn btn-sm btn-danger" id="containerStopBtn" onclick="containerAction('stop')">⏹️ Stop</button>
-              <button class="btn btn-sm btn-secondary" id="containerLogsBtn" onclick="loadContainerLogs()">📋 Logs</button>
-            </div>
-          </div>
-          <div id="containerLogsPanel" style="margin-top:16px;display:none">
-            <div class="section-header">
-              <h4 style="color:#94a3b8">Recent Logs</h4>
-              <button class="btn btn-xs btn-secondary" onclick="loadContainerLogs()">Refresh</button>
-            </div>
-            <div class="log-container" id="containerLogsContent">
-              <div class="log-empty">Loading logs...</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ============ ACTIVITY TAB ============ -->
-    <div class="tab-content" id="tab-activity" style="display:none">
-      <div class="section">
-        <div class="section-header">
-          <h2>📋 Activity Log</h2>
-          <button class="btn btn-sm btn-secondary" onclick="fetchActivityLog()">Refresh</button>
-        </div>
-        <p style="color:#64748b;margin-bottom:16px;font-size:0.9rem">Recent configuration changes and service actions.</p>
-        <div class="log-container" id="activityLogContainer">
-          <div class="log-empty">No activity yet.</div>
-        </div>
+      <div class="log-container" id="activityLogContainer">
+        <div class="log-empty">No activity yet.</div>
       </div>
     </div>
 
   </div>
 
-  <!-- ============ MODALS ============ -->
-
-  <!-- Add Route Modal -->
+  <!-- Modals -->
   <div class="modal-overlay" id="routeModal" style="display:none">
     <div class="modal">
       <h3>Add / Edit Route</h3>
-      <input type="text" id="routePath" placeholder="Path (e.g. /my-app, /api/books)" />
+      <input type="text" id="routePath" placeholder="Path (e.g. /my-app)" />
       <input type="text" id="routeTarget" placeholder="Target (e.g. http://host.docker.internal:4000)" />
-      <input type="text" id="routeName" placeholder="Name (e.g. My App)" />
+      <input type="text" id="routeName" placeholder="Name" />
       <input type="text" id="routeDesc" placeholder="Description (optional)" />
-      <label style="display:flex;align-items:center;gap:8px;margin:8px 0 12px;color:#94a3b8;font-size:0.85rem;cursor:pointer">
-        <input type="checkbox" id="routeRewriteHtml" style="width:auto" />
-        Rewrite HTML asset paths (for proxying UI apps)
-      </label>
+      <label class="checkbox-label"><input type="checkbox" id="routeRewriteHtml" /> Rewrite HTML asset paths</label>
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeModal('routeModal')">Cancel</button>
         <button class="btn" onclick="saveRoute()">Save</button>
@@ -239,19 +167,15 @@
     </div>
   </div>
 
-  <!-- Add Service Modal -->
   <div class="modal-overlay" id="serviceModal" style="display:none">
     <div class="modal">
       <h3>Register Service</h3>
       <input type="text" id="serviceName" placeholder="Service name (e.g. my-app)" />
       <input type="text" id="servicePrefix" placeholder="Prefix (e.g. /my-app)" />
       <input type="text" id="serviceTarget" placeholder="Target (e.g. http://my-app:4000)" />
-      <input type="text" id="serviceDocker" placeholder="Docker service name (for restart/stop)" />
+      <input type="text" id="serviceDocker" placeholder="Docker service name (optional)" />
       <input type="text" id="serviceDesc" placeholder="Description (optional)" />
-      <label style="display:flex;align-items:center;gap:8px;margin:8px 0 12px;color:#94a3b8;font-size:0.85rem;cursor:pointer">
-        <input type="checkbox" id="serviceRewriteHtml" style="width:auto" />
-        Rewrite HTML asset paths (for proxying UI apps)
-      </label>
+      <label class="checkbox-label"><input type="checkbox" id="serviceRewriteHtml" /> Rewrite HTML asset paths</label>
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeModal('serviceModal')">Cancel</button>
         <button class="btn" onclick="saveService()">Save</button>
@@ -259,16 +183,12 @@
     </div>
   </div>
 
-  <!-- Add/Edit Config Modal -->
   <div class="modal-overlay" id="configModal" style="display:none">
     <div class="modal">
       <h3 id="configModalTitle">Add Configuration</h3>
-      <input type="text" id="configKey" placeholder="Key (e.g. DB_URL, GOOGLE_TOKEN)" />
+      <input type="text" id="configKey" placeholder="Key (e.g. DB_URL)" />
       <input type="text" id="configValue" placeholder="Value" />
-      <label style="display:flex;align-items:center;gap:8px;margin:8px 0 12px;color:#94a3b8;font-size:0.85rem;cursor:pointer">
-        <input type="checkbox" id="configIsSecret" style="width:auto" checked />
-        Encrypt this value (secret)
-      </label>
+      <label class="checkbox-label"><input type="checkbox" id="configIsSecret" checked /> Encrypt this value (secret)</label>
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeModal('configModal')">Cancel</button>
         <button class="btn" onclick="saveConfig()">Save</button>
