@@ -171,6 +171,7 @@ function renderServices(services) {
         <div><span class="label">Created:</span> <span style="color:#94a3b8;font-size:0.8rem">${s.created_at || '-'}</span></div>
       </div>
       <div class="service-actions">
+        <button class="btn btn-xs btn-primary" onclick="window.open('${s.prefix}', '_blank')">🚀 Open</button>
         <button class="btn btn-xs btn-secondary" onclick="editService('${s.id}')">✏️ Edit</button>
         <button class="btn btn-xs ${s.enabled ? 'btn-secondary' : 'btn'}" onclick="toggleService('${s.id}')">${s.enabled ? 'Disable' : 'Enable'}</button>
         <button class="btn btn-xs btn-danger" onclick="deleteService('${s.id}')">Delete</button>
@@ -359,6 +360,7 @@ function renderConfigs(configs) {
       <td><span class="badge ${c.is_secret ? 'on' : 'off'}" style="font-size:0.7rem">${c.is_secret ? 'Secret' : 'Plain'}</span></td>
       <td style="color:#64748b;font-size:0.8rem">${c.updated_at || c.created_at || '-'}</td>
       <td>
+        <button class="btn btn-xs btn-secondary" onclick="editConfig('${c.key}', '${c.value.replace(/'/g, "\\'")}', ${c.is_secret})">✏️ Edit</button>
         <button class="btn btn-xs btn-danger" onclick="deleteConfig('${c.key}')">Delete</button>
       </td>
     </tr>
@@ -369,6 +371,17 @@ function showAddConfig() {
   document.getElementById('configKey').value = '';
   document.getElementById('configValue').value = '';
   document.getElementById('configIsSecret').checked = true;
+  document.getElementById('configModalTitle').textContent = '+ Add Config';
+  document.getElementById('configKey').disabled = false;
+  document.getElementById('configModal').style.display = 'flex';
+}
+
+function editConfig(key, value, isSecret) {
+  document.getElementById('configModalTitle').textContent = '✏️ Edit Config';
+  document.getElementById('configKey').value = key;
+  document.getElementById('configKey').disabled = true; // can't change key, delete+recreate instead
+  document.getElementById('configValue').value = isSecret ? '' : value;
+  document.getElementById('configIsSecret').checked = isSecret === 1 || isSecret === true;
   document.getElementById('configModal').style.display = 'flex';
 }
 

@@ -226,33 +226,35 @@ Services receive configs two ways:
 
 ### Implementation Order
 
-#### Milestone 1: Service Registry + Catch-All Proxy
-- [ ] Add SQLite DB with `services` table
-- [ ] Replace route-based proxy with service-based proxy (`/photos/*` → single service)
-- [ ] Service CRUD API (`/__gw/services/*`)
-- [ ] UI: Service Registry tab (list, add, edit, delete)
-- [ ] Migration: import existing routes into services
-- [ ] Catch-all sub-path forwarding (no more per-endpoint routes)
+#### Milestone 1: Service Registry + Catch-All Proxy ✅
+- [x] JSON store with `services` collection
+- [x] Dual proxy system: route-based (legacy) + service-based (catch-all `app.use(prefix, proxy)`)
+- [x] Service CRUD API (`/__gw/services/*`)
+- [x] UI: Service Registry tab (card-based list, add, edit, delete, toggle)
+- [x] Migration endpoint: `POST /__gw/services/migrate` (groups routes by target)
+- [x] Catch-all sub-path forwarding with prefix stripping (`/photos/api/stats` → `/api/stats`)
 
-#### Milestone 2: Encrypted Config Store
-- [ ] Add `configs` table to SQLite
-- [ ] AES-256 encrypt/decrypt for secret values
-- [ ] Config CRUD API (`/__gw/services/:id/config/*`)
-- [ ] UI: Config Manager tab per service
-- [ ] Config injection via request headers (`X-Config-{KEY}`)
-- [ ] Client pull API (`/_gw/config`)
+#### Milestone 2: Encrypted Config Store ✅
+- [x] JSON store with `configs` collection (cascade deleted with service)
+- [x] AES-256-GCM encrypt/decrypt for secret values (auto-detected)
+- [x] Config CRUD API (`/__gw/services/:id/config/*`)
+- [x] UI: Config Manager tab per service (add/bulk import, masked values)
+- [x] Config injection via request headers (`X-Config-{KEY}`) in `onProxyReq`
+- [x] Client pull API (`/_gw/config` — unprotected, keyed by `X-Service-Id`)
 
-#### Milestone 3: Container Lifecycle
-- [ ] Mount Docker socket in docker-compose
-- [ ] Dockerode integration for container status/restart/logs
-- [ ] Container management API
-- [ ] UI: Container Manager tab with status + buttons + logs
+#### Milestone 3: Container Lifecycle ✅
+- [x] Docker socket mounted in docker-compose (`/var/run/docker.sock:ro`)
+- [x] Dockerode integration for container status/restart/stop/start/logs
+- [x] Container management API (`/__gw/services/:id/container/*`)
+- [x] UI: Container Manager tab with status, Restart/Stop/Start buttons, logs viewer
 
-#### Milestone 4: Client Integration Guide + Polish
-- [ ] Write `SERVICE_GUIDE.md` with code examples for JS, Python, etc.
-- [ ] Add config export/import
-- [ ] Add webhook on config change (notify service to reload)
-- [ ] Request log upgrade: associate requests with service, store in DB
+#### Milestone 4: Client Integration Guide + Polish ✅
+- [x] `SERVICE_GUIDE.md` written — full integration guide with Node.js + Python examples
+- [x] `.gitignore` includes `gateway/data/` (encrypted configs not in repo)
+- [x] Config bulk import/export in UI
+- [x] Docker log stream headers cleaned up
+- [ ] Webhook on config change (notify service to reload)
+- [ ] Request log upgrade: associate requests with service, store in JSON
 - [ ] Backup/restore gateway config
 
 ### Docker Socket Security
