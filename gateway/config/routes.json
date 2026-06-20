@@ -5,7 +5,7 @@
       "target": "http://service-a:3001",
       "name": "Users Service",
       "description": "User management API",
-      "enabled": true,
+      "enabled": false,
       "rewriteHtml": false
     },
     {
@@ -13,7 +13,7 @@
       "target": "http://service-b:3002",
       "name": "Orders Service",
       "description": "Order management API",
-      "enabled": true,
+      "enabled": false,
       "rewriteHtml": false
     },
     {

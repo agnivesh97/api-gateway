@@ -5,19 +5,158 @@ const cors = require('cors');
 const morgan = require('morgan');
 const session = require('express-session');
 const { createProxyMiddleware, responseInterceptor } = require('http-proxy-middleware');
+const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 
+// ============================================================
+// Configuration
+// ============================================================
 const app = express();
 const PORT = process.env.PORT || 8080;
 const CONFIG_PATH = path.join(__dirname, 'config', 'routes.json');
+const DATA_DIR = path.join(__dirname, '..', 'data');
+const DB_PATH = path.join(DATA_DIR, 'gateway.json');
+const ENCRYPTION_KEY = process.env.GW_ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex'); // 64 hex chars = 32 bytes for AES-256
 
-// --- In-memory request log ---
+// Ensure data directory exists
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+// ============================================================
+// JSON File Store (lightweight alternative to SQLite)
+// ============================================================
+function loadDB() {
+  try {
+    return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
+  } catch {
+    return { services: [], configs: [] };
+  }
+}
+
+function saveDB(data) {
+  fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
+}
+
+function getServices() {
+  const db = loadDB();
+  return db.services;
+}
+
+function getService(id) {
+  return getServices().find(s => s.id === id);
+}
+
+function addService(service) {
+  const db = loadDB();
+  // Check uniqueness
+  if (db.services.some(s => s.name === service.name)) throw new Error('UNIQUE:name');
+  if (db.services.some(s => s.prefix === service.prefix)) throw new Error('UNIQUE:prefix');
+  db.services.push(service);
+  saveDB(db);
+  return service;
+}
+
+function updateService(id, updates) {
+  const db = loadDB();
+  const idx = db.services.findIndex(s => s.id === id);
+  if (idx < 0) return null;
+  if (updates.name && db.services.some(s => s.name === updates.name && s.id !== id)) throw new Error('UNIQUE:name');
+  if (updates.prefix && db.services.some(s => s.prefix === updates.prefix && s.id !== id)) throw new Error('UNIQUE:prefix');
+  db.services[idx] = { ...db.services[idx], ...updates, updated_at: new Date().toISOString() };
+  saveDB(db);
+  return db.services[idx];
+}
+
+function deleteService(id) {
+  const db = loadDB();
+  const idx = db.services.findIndex(s => s.id === id);
+  if (idx < 0) return false;
+  db.services.splice(idx, 1);
+  // Cascade delete configs
+  db.configs = db.configs.filter(c => c.service_id !== id);
+  saveDB(db);
+  return true;
+}
+
+// --- Config operations ---
+function getConfigs(serviceId) {
+  const db = loadDB();
+  return db.configs.filter(c => c.service_id === serviceId);
+}
+
+function upsertConfig(serviceId, key, value, isSecret) {
+  const db = loadDB();
+  const idx = db.configs.findIndex(c => c.service_id === serviceId && c.key === key);
+  const now = new Date().toISOString();
+  if (idx >= 0) {
+    db.configs[idx] = { ...db.configs[idx], value, is_secret: isSecret ? 1 : 0, updated_at: now };
+  } else {
+    db.configs.push({
+      id: uuidv4(),
+      service_id: serviceId,
+      key,
+      value,
+      is_secret: isSecret ? 1 : 0,
+      created_at: now,
+      updated_at: now,
+    });
+  }
+  saveDB(db);
+  return true;
+}
+
+function deleteConfig(serviceId, key) {
+  const db = loadDB();
+  db.configs = db.configs.filter(c => !(c.service_id === serviceId && c.key === key));
+  saveDB(db);
+}
+
+// ============================================================
+// Encryption helpers (AES-256-GCM)
+// ============================================================
+function encrypt(text) {
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
+  let encrypted = cipher.update(text, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag().toString('hex');
+  return iv.toString('hex') + ':' + authTag + ':' + encrypted;
+}
+
+function decrypt(encryptedText) {
+  try {
+    const parts = encryptedText.split(':');
+    if (parts.length !== 3) return encryptedText;
+    const iv = Buffer.from(parts[0], 'hex');
+    const authTag = Buffer.from(parts[1], 'hex');
+    const encrypted = parts[2];
+    const decipher = crypto.createDecipheriv('aes-256-gcm', Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch {
+    return encryptedText;
+  }
+}
+
+// ============================================================
+// In-memory request log (legacy)
+// ============================================================
 const requestLog = [];
+const activityLog = [];
 const MAX_LOG = 100;
 
-// --- Helpers ---
+// ============================================================
+// Helpers
+// ============================================================
 function loadRoutes() {
-  const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
-  return JSON.parse(raw).routes;
+  try {
+    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8')).routes;
+  } catch {
+    return [];
+  }
 }
 
 function saveRoutes(routes) {
@@ -35,7 +174,18 @@ function logRequest(req, res, target) {
   if (requestLog.length > MAX_LOG) requestLog.pop();
 }
 
-// --- Middleware ---
+function logActivity(action, detail) {
+  activityLog.unshift({
+    ts: new Date().toISOString(),
+    action,
+    detail,
+  });
+  if (activityLog.length > MAX_LOG) activityLog.pop();
+}
+
+// ============================================================
+// Middleware
+// ============================================================
 app.use(cors());
 app.use(express.json());
 app.use(morgan('short'));
@@ -45,22 +195,68 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'tiwariji-gateway-secret-2024',
   resave: false,
   saveUninitialized: false,
-  cookie: { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 }, // 24h
+  cookie: { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 },
 }));
 
-// --- Auth guard ---
-function requireAuth(req, res, next) {
-  if (req.session && req.session.user) return next();
-  if (req.accepts('html')) return res.redirect('/login.html');
-  return res.status(401).json({ error: 'Unauthorized' });
-}
+// ============================================================
+// Client Config API (unprotected — called by services)
+// ============================================================
+app.get('/_gw/config', (req, res) => {
+  const serviceId = req.headers['x-service-id'];
+  if (!serviceId) {
+    return res.status(400).json({ error: 'X-Service-Id header required' });
+  }
+  const service = getServices().find(s => s.id === serviceId || s.name === serviceId);
+  if (!service) {
+    return res.status(404).json({ error: 'Service not found' });
+  }
+  const configs = getConfigs(service.id);
+  const result = {};
+  configs.forEach(c => {
+    result[c.key] = c.is_secret ? decrypt(c.value) : c.value;
+  });
+  res.json(result);
+});
 
-// --- Login page (unprotected) ---
+/**
+ * POST /_gw/config
+ * Allows a proxied service to push configs back to the gateway (e.g. refreshed OAuth tokens).
+ * Authenticated by X-Service-Id header.
+ */
+app.post('/_gw/config', express.json(), (req, res) => {
+  const serviceId = req.headers['x-service-id'];
+  if (!serviceId) {
+    return res.status(400).json({ error: 'X-Service-Id header required' });
+  }
+  const service = getServices().find(s => s.id === serviceId || s.name === serviceId);
+  if (!service) {
+    return res.status(404).json({ error: 'Service not found' });
+  }
+  const { configs } = req.body;
+  if (!configs || typeof configs !== 'object') {
+    return res.status(400).json({ error: 'configs object required' });
+  }
+  try {
+    Object.entries(configs).forEach(([key, value]) => {
+      const strVal = typeof value === 'string' ? value : JSON.stringify(value);
+      // Auto-detect if it looks like a secret
+      const isSecret = strVal.length > 8 && !strVal.startsWith('file:') && !strVal.startsWith('http');
+      const storedVal = isSecret ? encrypt(strVal) : strVal;
+      upsertConfig(service.id, key, storedVal, isSecret);
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// ============================================================
+// Unprotected routes
+// ============================================================
 app.get('/login.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
-// --- Login API (unprotected) ---
 app.post('/__gw/login', (req, res) => {
   const { username, password } = req.body;
   if (username === 'agnivesh' && password === 'London@97') {
@@ -70,20 +266,31 @@ app.post('/__gw/login', (req, res) => {
   res.status(401).json({ error: 'Invalid username or password' });
 });
 
-// --- Auth gate: everything below requires login ---
+// ============================================================
+// Auth guard
+// ============================================================
 app.use(requireAuth);
 
-// --- Static dashboard (protected) ---
+function requireAuth(req, res, next) {
+  if (req.session && req.session.user) return next();
+  if (req.accepts('html')) return res.redirect('/login.html');
+  return res.status(401).json({ error: 'Unauthorized' });
+}
+
+// ============================================================
+// Static dashboard
+// ============================================================
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- API: Get all routes ---
+// ============================================================
+// LEGACY ROUTE CRUD API
+// ============================================================
 app.get('/__gw/routes', (req, res) => {
   res.json({ routes: loadRoutes() });
 });
 
-// --- API: Add/update a route ---
 app.post('/__gw/routes', (req, res) => {
-  const { path: routePath, target, name, description, rewriteHtml } = req.body;
+  const { path: routePath, target, name, description, rewriteHtml, preservePath } = req.body;
   if (!routePath || !target) {
     return res.status(400).json({ error: 'path and target are required' });
   }
@@ -96,28 +303,30 @@ app.post('/__gw/routes', (req, res) => {
     description: description || '',
     enabled: true,
     rewriteHtml: rewriteHtml === true,
+    preservePath: preservePath === true,
   };
   if (existing >= 0) {
     routes[existing] = { ...routes[existing], ...newRoute };
+    logActivity('route.update', `Updated route ${routePath} → ${target}`);
   } else {
     routes.push(newRoute);
+    logActivity('route.create', `Created route ${routePath} → ${target}`);
   }
   saveRoutes(routes);
   rebuildProxies();
   res.json({ routes });
 });
 
-// --- API: Delete a route ---
 app.delete('/__gw/routes/:encodedPath', (req, res) => {
   const routePath = decodeURIComponent(req.params.encodedPath);
   let routes = loadRoutes();
   routes = routes.filter(r => r.path !== routePath);
   saveRoutes(routes);
   rebuildProxies();
+  logActivity('route.delete', `Deleted route ${routePath}`);
   res.json({ routes });
 });
 
-// --- API: Toggle route enabled ---
 app.patch('/__gw/routes/:encodedPath/toggle', (req, res) => {
   const routePath = decodeURIComponent(req.params.encodedPath);
   const routes = loadRoutes();
@@ -126,20 +335,357 @@ app.patch('/__gw/routes/:encodedPath/toggle', (req, res) => {
   route.enabled = !route.enabled;
   saveRoutes(routes);
   rebuildProxies();
+  logActivity('route.toggle', `${route.enabled ? 'Enabled' : 'Disabled'} route ${routePath}`);
   res.json({ routes });
 });
 
-// --- API: Get request log ---
+// ============================================================
+// SERVICE REGISTRY API
+// ============================================================
+
+// --- List all services ---
+app.get('/__gw/services', (req, res) => {
+  try {
+    const services = getServices().map(s => ({
+      ...s,
+      config_count: getConfigs(s.id).length,
+    }));
+    res.json({ services });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Create service ---
+app.post('/__gw/services', (req, res) => {
+  const { name, prefix, target, docker_service, rewrite_html, preserve_path, description } = req.body;
+  if (!name || !prefix || !target) {
+    return res.status(400).json({ error: 'name, prefix, and target are required' });
+  }
+  try {
+    const id = uuidv4();
+    const service = {
+      id,
+      name,
+      prefix,
+      target,
+      docker_service: docker_service || '',
+      rewrite_html: rewrite_html ? 1 : 0,
+      preserve_path: preserve_path ? 1 : 0,
+      enabled: 1,
+      description: description || '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    addService(service);
+    rebuildServiceProxies();
+    logActivity('service.create', `Registered service "${name}" at ${prefix} → ${target}`);
+    res.json({ service });
+  } catch (err) {
+    if (err.message.startsWith('UNIQUE:')) {
+      return res.status(409).json({ error: `Service with same ${err.message.split(':')[1]} already exists` });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Get single service ---
+app.get('/__gw/services/:id', (req, res) => {
+  const service = getService(req.params.id);
+  if (!service) return res.status(404).json({ error: 'Service not found' });
+  const configs = getConfigs(service.id).map(c => ({
+    id: c.id,
+    key: c.key,
+    is_secret: c.is_secret,
+    value: c.is_secret ? '••••••••' : '(plaintext)',
+    created_at: c.created_at,
+    updated_at: c.updated_at,
+  }));
+  res.json({ service, configs });
+});
+
+// --- Update service ---
+app.put('/__gw/services/:id', (req, res) => {
+  const { name, prefix, target, docker_service, rewrite_html, preserve_path, description, enabled } = req.body;
+  try {
+    const existing = getService(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Service not found' });
+
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (prefix !== undefined) updates.prefix = prefix;
+    if (target !== undefined) updates.target = target;
+    if (docker_service !== undefined) updates.docker_service = docker_service;
+    if (rewrite_html !== undefined) updates.rewrite_html = rewrite_html ? 1 : 0;
+    if (preserve_path !== undefined) updates.preserve_path = preserve_path ? 1 : 0;
+    if (description !== undefined) updates.description = description;
+    if (enabled !== undefined) updates.enabled = enabled ? 1 : 0;
+
+    const updated = updateService(req.params.id, updates);
+    if (!updated) return res.status(404).json({ error: 'Service not found' });
+
+    rebuildServiceProxies();
+    logActivity('service.update', `Updated service "${updated.name}"`);
+    res.json({ service: updated });
+  } catch (err) {
+    if (err.message.startsWith('UNIQUE:')) {
+      return res.status(409).json({ error: `Service with same ${err.message.split(':')[1]} already exists` });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Delete service ---
+app.delete('/__gw/services/:id', (req, res) => {
+  try {
+    const svc = getService(req.params.id);
+    if (!deleteService(req.params.id)) {
+      return res.status(404).json({ error: 'Service not found' });
+    }
+    rebuildServiceProxies();
+    logActivity('service.delete', `Deleted service "${svc?.name}"`);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Toggle service ---
+app.patch('/__gw/services/:id/toggle', (req, res) => {
+  try {
+    const service = getService(req.params.id);
+    if (!service) return res.status(404).json({ error: 'Service not found' });
+    const newEnabled = service.enabled ? 0 : 1;
+    const updated = updateService(req.params.id, { enabled: newEnabled });
+    rebuildServiceProxies();
+    logActivity('service.toggle', `${newEnabled ? 'Enabled' : 'Disabled'} service "${service.name}"`);
+    res.json({ service: updated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Migrate routes to services ---
+app.post('/__gw/services/migrate', (req, res) => {
+  try {
+    const routes = loadRoutes();
+    const groups = {};
+    routes.forEach(r => {
+      if (!groups[r.target]) groups[r.target] = [];
+      groups[r.target].push(r);
+    });
+
+    let created = 0;
+    Object.entries(groups).forEach(([target, targetRoutes]) => {
+      const name = targetRoutes[0].name?.replace(/\s*[-–—].*$/, '').trim() || target.replace(/^https?:\/\//, '').split(':')[0];
+      const shortestPath = targetRoutes.reduce((a, b) => a.path.length < b.path.length ? a : b);
+      const prefix = '/' + shortestPath.path.split('/').filter(Boolean)[0];
+      const rewriteHtml = targetRoutes.some(r => r.rewriteHtml);
+      const preservePath = targetRoutes.every(r => r.preservePath);
+
+      try {
+        addService({
+          id: uuidv4(),
+          name,
+          prefix,
+          target,
+          docker_service: '',
+          rewrite_html: rewriteHtml ? 1 : 0,
+          preserve_path: preservePath ? 1 : 0,
+          enabled: 1,
+          description: `${targetRoutes.length} routes merged from migration`,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+        created++;
+      } catch {
+        // Skip duplicate
+      }
+    });
+
+    rebuildServiceProxies();
+    logActivity('service.migrate', `Migrated ${created} route groups to services`);
+    res.json({ created, total: Object.keys(groups).length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// CONFIG STORE API
+// ============================================================
+
+// --- List configs ---
+app.get('/__gw/services/:id/config', (req, res) => {
+  const service = getService(req.params.id);
+  if (!service) return res.status(404).json({ error: 'Service not found' });
+  const configs = getConfigs(service.id).map(c => ({
+    ...c,
+    value: c.is_secret ? '••••••••' : c.value,
+  }));
+  res.json({ configs });
+});
+
+// --- Bulk set configs ---
+app.put('/__gw/services/:id/config', (req, res) => {
+  const service = getService(req.params.id);
+  if (!service) return res.status(404).json({ error: 'Service not found' });
+  const { configs } = req.body;
+  if (!configs || typeof configs !== 'object') {
+    return res.status(400).json({ error: 'configs object required' });
+  }
+
+  try {
+    Object.entries(configs).forEach(([key, value]) => {
+      const isSecret = typeof value === 'string' && value.length > 8 &&
+        !value.startsWith('file:') && !value.startsWith('http');
+      const storedVal = isSecret ? encrypt(value) : value;
+      upsertConfig(service.id, key, storedVal, isSecret);
+    });
+
+    const updated = getConfigs(service.id).map(c => ({
+      ...c,
+      value: c.is_secret ? '••••••••' : c.value,
+    }));
+    logActivity('config.update', `Updated configs for service "${service.name}": ${Object.keys(configs).join(', ')}`);
+    res.json({ configs: updated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Delete config key ---
+app.delete('/__gw/services/:id/config/:key', (req, res) => {
+  const service = getService(req.params.id);
+  if (!service) return res.status(404).json({ error: 'Service not found' });
+  deleteConfig(service.id, req.params.key);
+  logActivity('config.delete', `Deleted config "${req.params.key}" from "${service.name}"`);
+  res.json({ ok: true });
+});
+
+// ============================================================
+// CONTAINER MANAGEMENT API
+// ============================================================
+const Docker = require('dockerode');
+const docker = new Docker();
+
+async function getContainer(serviceId) {
+  const service = getService(serviceId);
+  if (!service || !service.docker_service) return null;
+
+  const containers = await docker.listContainers({ all: true });
+  const containerInfo = containers.find(c =>
+    c.Names.some(n => n.includes(service.docker_service))
+  );
+  if (!containerInfo) return null;
+
+  const container = docker.getContainer(containerInfo.Id);
+  return { container, info: containerInfo };
+}
+
+// --- Container status ---
+app.get('/__gw/services/:id/container', async (req, res) => {
+  try {
+    const result = await getContainer(req.params.id);
+    if (!result) return res.json({ status: 'unknown', message: 'No Docker container found' });
+    const { info } = result;
+    res.json({
+      id: info.Id.slice(0, 12),
+      name: info.Names[0].replace(/^\//, ''),
+      status: info.State,
+      state: info.Status,
+      image: info.Image,
+      created: new Date(info.Created * 1000).toISOString(),
+      ports: info.Ports?.map(p => `${p.PrivatePort}->${p.PublicPort || '?'}`) || [],
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Restart container ---
+app.post('/__gw/services/:id/container/restart', async (req, res) => {
+  try {
+    const result = await getContainer(req.params.id);
+    if (!result) return res.status(404).json({ error: 'Container not found' });
+    const svc = getService(req.params.id);
+    await result.container.restart();
+    logActivity('container.restart', `Restarted container for "${svc?.name}"`);
+    res.json({ ok: true, message: 'Container restarted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Start container ---
+app.post('/__gw/services/:id/container/start', async (req, res) => {
+  try {
+    const result = await getContainer(req.params.id);
+    if (!result) return res.status(404).json({ error: 'Container not found' });
+    const svc = getService(req.params.id);
+    await result.container.start();
+    logActivity('container.start', `Started container for "${svc?.name}"`);
+    res.json({ ok: true, message: 'Container started' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Stop container ---
+app.post('/__gw/services/:id/container/stop', async (req, res) => {
+  try {
+    const result = await getContainer(req.params.id);
+    if (!result) return res.status(404).json({ error: 'Container not found' });
+    const svc = getService(req.params.id);
+    await result.container.stop();
+    logActivity('container.stop', `Stopped container for "${svc?.name}"`);
+    res.json({ ok: true, message: 'Container stopped' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Container logs ---
+app.get('/__gw/services/:id/container/logs', async (req, res) => {
+  try {
+    const result = await getContainer(req.params.id);
+    if (!result) return res.status(404).json({ error: 'Container not found' });
+    const logs = await result.container.logs({
+      stdout: true,
+      stderr: true,
+      tail: 50,
+      timestamps: false,
+    });
+    // Strip Docker stream headers (1-byte type + 3-byte pad + 4-byte length) from each chunk
+    const raw = logs.toString('utf-8');
+    const lines = raw.split('\n').filter(Boolean).map(line => {
+      // Docker multiplexed stream: first 8 bytes are header, rest is content
+      if (line.length > 8 && /^[\x00-\x02]/.test(line)) {
+        return line.substring(8);
+      }
+      return line;
+    });
+    res.json({ logs: lines });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// HELPER APIs
+// ============================================================
 app.get('/__gw/log', (req, res) => {
   res.json({ log: requestLog });
 });
 
-// --- API: Health check ---
 app.get('/__gw/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
-// --- API: Logout ---
+app.get('/__gw/activity', (req, res) => {
+  res.json({ activity: activityLog });
+});
+
 app.post('/__gw/logout', (req, res) => {
   req.session.destroy(err => {
     if (err) return res.status(500).json({ error: 'Logout failed' });
@@ -147,56 +693,53 @@ app.post('/__gw/logout', (req, res) => {
   });
 });
 
-// --- API: Session check ---
 app.get('/__gw/me', (req, res) => {
   res.json({ user: req.session.user.username });
 });
 
-// --- Dynamic proxy rebuild ---
-let proxyStack = [];
+// ============================================================
+// PROXY SYSTEM
+// ============================================================
 
-function rebuildProxies() {
-  // Remove old proxy middleware (they're stacked, so we clear app._router)
-  // Instead, we maintain a middleware stack manually
-  proxyStack.forEach(fn => {
+let serviceProxyStack = [];
+let routeProxyStack = [];
+
+function rebuildServiceProxies() {
+  // Remove old service proxies
+  serviceProxyStack.forEach(fn => {
     const idx = app._router?.stack?.findIndex(s => s.handle === fn);
     if (idx >= 0) app._router.stack.splice(idx, 1);
   });
-  proxyStack = [];
+  serviceProxyStack = [];
 
-  const routes = loadRoutes();
-  routes.filter(r => r.enabled).forEach(route => {
-    const handleHtmlRewrite = route.rewriteHtml === true;
+  const services = getServices().filter(s => s.enabled === 1);
 
-    // Path rewrite logic:
-    // - API routes (rewriteHtml: false): strip /api → keep /users
-    //   e.g. /api/users/1 → /users/1
-    // - UI routes (rewriteHtml: true): strip entire prefix
-    //   e.g. /api/pdf/ → /  or  /api/pdf/css/style.css → /css/style.css
-    const pathParts = route.path.split('/').filter(Boolean);
-    let rewriteRule;
-    if (handleHtmlRewrite) {
-      // Strip the entire route prefix for UI apps mounted at a sub-path
-      rewriteRule = { [`^${route.path}`]: '' };
-    } else {
-      // Strip only the first path segment (e.g. /api) for API routes
-      const apiPrefix = '/' + pathParts[0];
-      const servicePath = '/' + pathParts.slice(1).join('/');
-      rewriteRule = { [`^${apiPrefix}${servicePath}`]: servicePath };
-    }
-
-    // --- HTML path rewriting for UI apps ---
-    // When a UI app is served at a sub-path, its HTML may reference
-    // assets with absolute paths like src="/style.css". These need
-    // to be rewritten to src="/my-app/style.css" so the browser
-    // routes them back through the gateway.
+  services.forEach(service => {
+    const handleHtmlRewrite = service.rewrite_html === 1;
 
     const proxyOptions = {
-      target: route.target,
+      target: service.target,
       changeOrigin: true,
-      pathRewrite: rewriteRule,
+      pathRewrite: {
+        [`^${service.prefix}`]: '',
+      },
       onProxyReq: (proxyReq, req, res) => {
-        logRequest(req, res, route.target);
+        logRequest(req, res, service.target);
+
+        // Inject config headers
+        const configs = getConfigs(service.id);
+        configs.forEach(c => {
+          const val = c.is_secret ? decrypt(c.value) : c.value;
+          const headerName = `x-config-${c.key.replace(/_/g, '-').toLowerCase()}`;
+          proxyReq.setHeader(headerName, val);
+        });
+
+        // Re-attach body
+        if (req.body && Object.keys(req.body).length > 0) {
+          const bodyStr = JSON.stringify(req.body);
+          proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyStr));
+          proxyReq.write(bodyStr);
+        }
       },
       onError: (err, req, res) => {
         console.error(`Proxy error for ${req.path}:`, err.message);
@@ -205,54 +748,114 @@ function rebuildProxies() {
     };
 
     if (handleHtmlRewrite) {
-      // Use built-in responseInterceptor (handles gzip/brotli/deflate decompression)
       proxyOptions.selfHandleResponse = true;
       proxyOptions.onProxyRes = responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
         const contentType = proxyRes.headers['content-type'] || '';
-
         if (contentType.includes('text/html')) {
           let html = responseBuffer.toString('utf-8');
-          const prefix = route.path.replace(/\/+$/, ''); // strip trailing slash
-
-          // 1. Rewrite absolute paths in HTML attributes
-          //    e.g. src="/app.js" → src="/pdf/app.js"
+          const prefix = service.prefix.replace(/\/+$/, '');
           html = html
             .replace(/((?:src|href|srcset|action|poster|data-src|formaction|xlink:href)\s*=\s*["'])\/(?!\/)/g, `$1${prefix}/`)
             .replace(/url\(\s*['"]?\/(?!\/)/g, `url(${prefix}/`);
-
-          // 2. Inject <base> tag LAST so it's not rewritten by step 1
-          //    This tells the browser to resolve ALL relative URLs (incl. JavaScript
-          //    dynamic paths, fetch calls, etc.) against the route prefix
           if (!html.includes('<base ')) {
             html = html.replace('<head>', `<head><base href="${prefix}/">`);
           }
-
           return html;
         }
-
-        // Non-HTML: pass through as-is
         return responseBuffer;
       });
     }
 
     const proxy = createProxyMiddleware(proxyOptions);
-
-    app.use(route.path, proxy);
-    proxyStack.push(proxy);
+    app.use(service.prefix, proxy);
+    serviceProxyStack.push(proxy);
   });
 
-  console.log(`🔁 Rebuilt ${routes.filter(r => r.enabled).length} proxy routes`);
+  console.log(`🔁 Rebuilt ${services.length} service proxies`);
 }
 
-// --- Init ---
+function rebuildProxies() {
+  // Remove old route proxies
+  routeProxyStack.forEach(fn => {
+    const idx = app._router?.stack?.findIndex(s => s.handle === fn);
+    if (idx >= 0) app._router.stack.splice(idx, 1);
+  });
+  routeProxyStack = [];
+
+  const routes = loadRoutes();
+  routes.filter(r => r.enabled).forEach(route => {
+    const handleHtmlRewrite = route.rewriteHtml === true;
+
+    const pathParts = route.path.split('/').filter(Boolean);
+    let rewriteRule;
+    if (route.preservePath) {
+      rewriteRule = {};
+    } else if (handleHtmlRewrite) {
+      rewriteRule = { [`^${route.path}`]: '' };
+    } else {
+      const apiPrefix = '/' + pathParts[0];
+      const servicePath = '/' + pathParts.slice(1).join('/');
+      rewriteRule = { [`^${apiPrefix}${servicePath}`]: servicePath };
+    }
+
+    const proxyOptions = {
+      target: route.target,
+      changeOrigin: true,
+      pathRewrite: rewriteRule,
+      onProxyReq: (proxyReq, req, res) => {
+        logRequest(req, res, route.target);
+        if (req.body && Object.keys(req.body).length > 0) {
+          const bodyStr = JSON.stringify(req.body);
+          proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyStr));
+          proxyReq.write(bodyStr);
+        }
+      },
+      onError: (err, req, res) => {
+        console.error(`Proxy error for ${req.path}:`, err.message);
+        res.status(502).json({ error: `Bad Gateway: ${err.message}` });
+      },
+    };
+
+    if (handleHtmlRewrite) {
+      proxyOptions.selfHandleResponse = true;
+      proxyOptions.onProxyRes = responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
+        const contentType = proxyRes.headers['content-type'] || '';
+        if (contentType.includes('text/html')) {
+          let html = responseBuffer.toString('utf-8');
+          const prefix = route.path.replace(/\/+$/, '');
+          html = html
+            .replace(/((?:src|href|srcset|action|poster|data-src|formaction|xlink:href)\s*=\s*["'])\/(?!\/)/g, `$1${prefix}/`)
+            .replace(/url\(\s*['"]?\/(?!\/)/g, `url(${prefix}/`);
+          if (!html.includes('<base ')) {
+            html = html.replace('<head>', `<head><base href="${prefix}/">`);
+          }
+          return html;
+        }
+        return responseBuffer;
+      });
+    }
+
+    const proxy = createProxyMiddleware(proxyOptions);
+    app.use(route.path, proxy);
+    routeProxyStack.push(proxy);
+  });
+
+  console.log(`🔁 Rebuilt ${routes.filter(r => r.enabled).length} route proxies`);
+}
+
+// ============================================================
+// Init
+// ============================================================
 rebuildProxies();
+rebuildServiceProxies();
 
 app.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════╗
-║    TiwariJi API Gateway 🚀              ║
+║    TiwariJi API Gateway v2 🚀           ║
 ║    Dashboard: http://localhost:${PORT}   ║
 ║    Port: ${PORT}                         ║
+║    Services + Config + Container Ready   ║
 ╚══════════════════════════════════════════╝
   `);
 });
